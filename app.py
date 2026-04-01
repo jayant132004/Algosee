@@ -5,14 +5,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import random
 import string
 import os
+from dotenv import load_dotenv
 
 env_path = os.path.join(os.path.dirname(__file__), '.env')
-if os.path.exists(env_path):
-    with open(env_path) as f:
-        for line in f:
-            if '=' in line and not line.strip().startswith('#'):
-                k, v = line.strip().split('=', 1)
-                os.environ[k.strip()] = v.strip()
+load_dotenv(env_path)
 
 app = Flask(__name__)
 
@@ -90,30 +86,35 @@ def forgot_password():
             new_password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
             user.password = generate_password_hash(new_password, method='pbkdf2:sha256')
             db.session.commit()
-            if send_reset_email(email, new_password):
+            success, error_msg = send_reset_email(email, new_password)
+            if success:
                 flash("A new password has been sent to your email.", "success")
             else:
-                flash("Password was reset, but email is not configured on the server.", "warning")
+                flash(f"Email could not be sent ({error_msg}). Your temporary password is: {new_password} (Please copy it now)", "warning")
             return redirect(url_for('login'))
         else:
             flash("No account found with that email.", "danger")
     return render_template("forgot.html")
 
-def send_reset_email(email: str, new_password: str) -> bool:
+def send_reset_email(email: str, new_password: str) -> tuple:
     """
     Send a password reset email if MAIL_USERNAME / MAIL_PASSWORD are configured.
-    Returns True if sent, False otherwise.
+    Returns (True, "") if sent, (False, error_message) otherwise.
     """
     if not app.config.get("MAIL_USERNAME") or not app.config.get("MAIL_PASSWORD"):
-        return False
-    msg = Message(
-        "Your password reset",
-        sender=app.config["MAIL_USERNAME"],
-        recipients=[email],
-    )
-    msg.body = f"Your new temporary password is: {new_password}\n\nPlease log in and change it."
-    mail.send(msg)
-    return True
+        return False, "Missing MAIL_USERNAME or MAIL_PASSWORD in .env"
+    try:
+        msg = Message(
+            "Your password reset",
+            sender=app.config["MAIL_USERNAME"],
+            recipients=[email],
+        )
+        msg.body = f"Your new temporary password is: {new_password}\n\nPlease log in and change it."
+        mail.send(msg)
+        return True, ""
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+        return False, str(e)
 
 
 
